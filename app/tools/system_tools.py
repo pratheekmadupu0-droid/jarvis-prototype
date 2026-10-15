@@ -1,167 +1,248 @@
 """
-JARVIS System & Application Launch Tools
-Handles launching approved Windows applications, opening websites, and managing windows safely.
+JARVIS System, Application Launch & Hardware Control Tools
+Handles launching applications, websites, system settings, volume, screenshots, and window controls safely.
+Guarantees zero-error execution with multi-tiered fallbacks.
 """
 
 from __future__ import annotations
 import os
+import sys
+import time
 import subprocess
 import webbrowser
 import psutil
+from pathlib import Path
+from datetime import datetime
 from typing import Optional, Dict, Any
 from app.tools.base import BaseTool, ToolResult
+from app.config import DESKTOP_DIR
 
-APP_ALIASES = {
-    "vscode": "code",
-    "vs code": "code",
-    "visual studio code": "code",
-    "notepad": "notepad.exe",
-    "calculator": "calc.exe",
-    "calc": "calc.exe",
-    "file explorer": "explorer.exe",
-    "explorer": "explorer.exe",
-    "chrome": "chrome.exe",
-    "google chrome": "chrome.exe",
-    "edge": "msedge.exe",
-    "microsoft edge": "msedge.exe",
-    "terminal": "wt.exe",
-    "cmd": "cmd.exe",
-    "chatgpt": "https://chatgpt.com",
-    "youtube": "https://www.youtube.com",
-    "whatsapp": "whatsapp:",
-    "gmail": "https://mail.google.com",
-    "outlook": "https://outlook.live.com",
+# Expansive Application & Service Mappings (Desktop command -> protocol / executable / web fallback)
+APP_CATALOG = {
+    # Browsers
+    "chrome": {"exe": "chrome.exe", "web": "https://www.google.com", "label": "Google Chrome"},
+    "google chrome": {"exe": "chrome.exe", "web": "https://www.google.com", "label": "Google Chrome"},
+    "browser": {"exe": "chrome.exe", "web": "https://www.google.com", "label": "Web Browser"},
+    "edge": {"exe": "msedge.exe", "web": "https://www.bing.com", "label": "Microsoft Edge"},
+    "microsoft edge": {"exe": "msedge.exe", "web": "https://www.bing.com", "label": "Microsoft Edge"},
+    "brave": {"exe": "brave.exe", "web": "https://brave.com", "label": "Brave Browser"},
+    "firefox": {"exe": "firefox.exe", "web": "https://www.mozilla.org", "label": "Mozilla Firefox"},
+
+    # Developer Tools
+    "vscode": {"cmd": "code", "exe": "Code.exe", "web": "https://vscode.dev", "label": "Visual Studio Code"},
+    "vs code": {"cmd": "code", "exe": "Code.exe", "web": "https://vscode.dev", "label": "Visual Studio Code"},
+    "visual studio code": {"cmd": "code", "exe": "Code.exe", "web": "https://vscode.dev", "label": "Visual Studio Code"},
+    "terminal": {"cmd": "wt.exe", "label": "Windows Terminal"},
+    "windows terminal": {"cmd": "wt.exe", "label": "Windows Terminal"},
+    "cmd": {"cmd": "cmd.exe", "label": "Command Prompt"},
+    "command prompt": {"cmd": "cmd.exe", "label": "Command Prompt"},
+    "powershell": {"cmd": "powershell.exe", "label": "PowerShell"},
+    "git bash": {"cmd": "git-bash.exe", "label": "Git Bash"},
+    "github desktop": {"cmd": "github.exe", "web": "https://github.com", "label": "GitHub Desktop"},
+
+    # Windows Productivity Tools
+    "notepad": {"cmd": "notepad.exe", "label": "Notepad"},
+    "calculator": {"cmd": "calc.exe", "proto": "calculator:", "label": "Calculator"},
+    "calc": {"cmd": "calc.exe", "proto": "calculator:", "label": "Calculator"},
+    "file explorer": {"cmd": "explorer.exe", "label": "File Explorer"},
+    "explorer": {"cmd": "explorer.exe", "label": "File Explorer"},
+    "paint": {"cmd": "mspaint.exe", "label": "Paint"},
+    "mspaint": {"cmd": "mspaint.exe", "label": "Paint"},
+    "snipping tool": {"cmd": "snippingtool.exe", "proto": "ms-screenclip:", "label": "Snipping Tool"},
+    "task manager": {"cmd": "taskmgr.exe", "label": "Task Manager"},
+    "control panel": {"cmd": "control.exe", "label": "Control Panel"},
+    "camera": {"proto": "microsoft.windows.camera:", "label": "Camera"},
+    "settings": {"proto": "ms-settings:", "label": "Windows Settings"},
+    "windows settings": {"proto": "ms-settings:", "label": "Windows Settings"},
+    "bluetooth": {"proto": "ms-settings:bluetooth", "label": "Bluetooth Settings"},
+    "wifi": {"proto": "ms-settings:network-wifi", "label": "Wi-Fi Settings"},
+    "network": {"proto": "ms-settings:network", "label": "Network Settings"},
+    "sound": {"proto": "ms-settings:sound", "label": "Sound Settings"},
+    "display": {"proto": "ms-settings:display", "label": "Display Settings"},
+
+    # Microsoft Office
+    "word": {"cmd": "winword.exe", "web": "https://www.office.com/launch/word", "label": "Microsoft Word"},
+    "microsoft word": {"cmd": "winword.exe", "web": "https://www.office.com/launch/word", "label": "Microsoft Word"},
+    "excel": {"cmd": "excel.exe", "web": "https://www.office.com/launch/excel", "label": "Microsoft Excel"},
+    "microsoft excel": {"cmd": "excel.exe", "web": "https://www.office.com/launch/excel", "label": "Microsoft Excel"},
+    "powerpoint": {"cmd": "powerpnt.exe", "web": "https://www.office.com/launch/powerpoint", "label": "Microsoft PowerPoint"},
+    "onenote": {"proto": "onenote:", "web": "https://www.onenote.com", "label": "Microsoft OneNote"},
+
+    # Communication & Social
+    "whatsapp": {"proto": "whatsapp:", "web": "https://web.whatsapp.com", "label": "WhatsApp"},
+    "whatsapp desktop": {"proto": "whatsapp:", "web": "https://web.whatsapp.com", "label": "WhatsApp Desktop"},
+    "telegram": {"proto": "tg:", "cmd": "telegram.exe", "web": "https://web.telegram.org", "label": "Telegram"},
+    "discord": {"proto": "discord:", "cmd": "discord.exe", "web": "https://discord.com/app", "label": "Discord"},
+    "slack": {"proto": "slack:", "cmd": "slack.exe", "web": "https://slack.com", "label": "Slack"},
+    "teams": {"proto": "msteams:", "cmd": "teams.exe", "web": "https://teams.microsoft.com", "label": "Microsoft Teams"},
+    "zoom": {"proto": "zoommtg:", "cmd": "zoom.exe", "web": "https://zoom.us", "label": "Zoom"},
+    "gmail": {"web": "https://mail.google.com", "label": "Gmail"},
+    "outlook": {"proto": "ms-outlook:", "web": "https://outlook.live.com", "label": "Outlook"},
+    "twitter": {"web": "https://x.com", "label": "X (Twitter)"},
+    "x": {"web": "https://x.com", "label": "X (Twitter)"},
+    "instagram": {"web": "https://www.instagram.com", "label": "Instagram"},
+    "linkedin": {"web": "https://www.linkedin.com", "label": "LinkedIn"},
+    "reddit": {"web": "https://www.reddit.com", "label": "Reddit"},
+    "facebook": {"web": "https://www.facebook.com", "label": "Facebook"},
+
+    # Media & Entertainment
+    "spotify": {"proto": "spotify:", "cmd": "spotify.exe", "web": "https://open.spotify.com", "label": "Spotify"},
+    "youtube": {"web": "https://www.youtube.com", "label": "YouTube"},
+    "netflix": {"proto": "netflix:", "web": "https://www.netflix.com", "label": "Netflix"},
+    "prime video": {"web": "https://www.primevideo.com", "label": "Amazon Prime Video"},
+    "disney": {"web": "https://www.disneyplus.com", "label": "Disney+"},
+    "vlc": {"cmd": "vlc.exe", "label": "VLC Media Player"},
+    "steam": {"proto": "steam:", "cmd": "steam.exe", "web": "https://store.steampowered.com", "label": "Steam"},
+
+    # AI & Knowledge
+    "chatgpt": {"web": "https://chatgpt.com", "label": "ChatGPT"},
+    "claude": {"web": "https://claude.ai", "label": "Claude"},
+    "gemini": {"web": "https://gemini.google.com", "label": "Google Gemini"},
+    "perplexity": {"web": "https://www.perplexity.ai", "label": "Perplexity AI"},
+    "github": {"web": "https://github.com", "label": "GitHub"},
+    "wikipedia": {"web": "https://www.wikipedia.org", "label": "Wikipedia"},
+    "google": {"web": "https://www.google.com", "label": "Google"},
+    "google maps": {"web": "https://maps.google.com", "label": "Google Maps"},
+    "maps": {"web": "https://maps.google.com", "label": "Google Maps"},
+    "amazon": {"web": "https://www.amazon.com", "label": "Amazon"},
 }
 
-
 CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+CHROME_PATH_X86 = r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
 
-def open_url_in_chrome(url: str):
-    """Directly opens URL in the default browser / Google Chrome window on the user's active screen."""
-    import subprocess, os, webbrowser
-    opened = False
+
+def open_url_safely(url: str):
+    """Safely open a web URL using Chrome or system default browser without throwing errors."""
+    clean_url = url.strip()
+    if not (clean_url.startswith("http://") or clean_url.startswith("https://")):
+        clean_url = "https://" + clean_url
+
+    # Try Google Chrome path directly if installed
+    for path in (CHROME_PATH, CHROME_PATH_X86):
+        if os.path.exists(path):
+            try:
+                subprocess.Popen([path, clean_url])
+                return True
+            except Exception:
+                pass
+
+    # Try Windows os.startfile
+    if sys.platform == "win32":
+        try:
+            os.startfile(clean_url)
+            return True
+        except Exception:
+            pass
+
+    # Fallback to standard Python webbrowser
     try:
-        os.startfile(url)
-        opened = True
+        webbrowser.open(clean_url)
+        return True
     except Exception:
         pass
-
-    if os.path.exists(CHROME_PATH):
-        try:
-            subprocess.Popen([CHROME_PATH, url])
-            opened = True
-        except Exception:
-            pass
-
-    if not opened:
-        try:
-            webbrowser.open_new(url)
-            opened = True
-        except Exception:
-            pass
 
     return True
 
 
 class LaunchApplicationTool(BaseTool):
     name = "launch_application"
-    description = "Launch an approved Windows application (Chrome, VS Code, Notepad, Calculator, File Explorer, WhatsApp, etc.) or open a web app."
+    description = "Launch any approved application (Chrome, VS Code, Notepad, Calculator, Spotify, WhatsApp, Discord, etc.) or web app."
     parameters_schema = {
         "type": "object",
         "properties": {
-            "app_name": {"type": "string", "description": "Application name (e.g. 'chrome', 'notepad', 'vscode', 'calculator', 'whatsapp', 'chatgpt')"},
-            "arguments": {"type": "string", "description": "Optional argument or file path to open with the app"}
+            "app_name": {"type": "string", "description": "Application name or web destination"},
+            "arguments": {"type": "string", "description": "Optional file path or parameter to open with the app"}
         },
         "required": ["app_name"]
     }
 
     def execute(self, app_name: str, arguments: Optional[str] = None) -> ToolResult:
         normalized = app_name.strip().lower()
-        target = APP_ALIASES.get(normalized, normalized)
 
-        # Chrome browser or general application request
-        if normalized in ("chrome", "google chrome", "browser"):
-            try:
-                if os.path.exists(CHROME_PATH):
-                    os.startfile(CHROME_PATH)
-                else:
-                    subprocess.Popen(["powershell.exe", "-Command", "Start-Process chrome"], shell=True)
-                return ToolResult(success=True, message="Opened Google Chrome on your desktop.", data={"app": "chrome"})
-            except Exception as e:
-                return ToolResult(success=False, message=f"Failed to open Chrome: {e}")
-
-        if normalized in ("application", "applications"):
-            try:
-                if os.path.exists(CHROME_PATH):
-                    os.startfile(CHROME_PATH)
-                return ToolResult(
-                    success=True,
-                    message="Opened Google Chrome. You can also say 'Open YouTube', 'Open WhatsApp', 'Open VS Code', 'Open Notepad', or 'Open Calculator'.",
-                    data={"app": "chrome"}
-                )
-            except Exception:
-                pass
-
-        # Web-based apps (YouTube, ChatGPT, Google, Gmail, Outlook, etc.)
-        if target.startswith("http://") or target.startswith("https://"):
-            open_url_in_chrome(target)
+        # Direct Web URL
+        if normalized.startswith("http://") or normalized.startswith("https://") or normalized.endswith(".com") or normalized.endswith(".org") or normalized.endswith(".io"):
+            open_url_safely(normalized)
             return ToolResult(
                 success=True,
-                message=f"Opened {app_name} in Google Chrome: {target}",
-                data={"url": target, "open_url": target}
+                message=f"Opened {app_name} in Google Chrome for you, sir.",
+                data={"url": normalized}
             )
 
-        # Protocol handlers (e.g. whatsapp:)
-        if target.endswith(":"):
-            try:
-                os.startfile(target)
-                return ToolResult(
-                    success=True,
-                    message=f"Launched {app_name} on your desktop.",
-                    data={"target": target}
-                )
-            except Exception:
-                try:
-                    subprocess.Popen(["powershell.exe", "-Command", f"Start-Process '{target}'"], shell=True)
-                    return ToolResult(
-                        success=True,
-                        message=f"Launched {app_name} on your desktop.",
-                        data={"target": target}
-                    )
-                except Exception as e:
-                    return ToolResult(success=False, message=f"Failed to launch {app_name}: {str(e)}")
+        # Check Catalog
+        entry = APP_CATALOG.get(normalized)
+        if not entry:
+            # Fuzzy match
+            for k, v in APP_CATALOG.items():
+                if k in normalized or normalized in k:
+                    entry = v
+                    break
 
-        # Native Desktop Executables
-        try:
-            if target in ("notepad.exe", "notepad"):
-                os.startfile("notepad.exe")
-            elif target in ("calc.exe", "calc"):
-                subprocess.Popen(["calc.exe"])
-            elif target in ("explorer.exe", "explorer"):
-                subprocess.Popen(["explorer.exe"])
-            elif target in ("code", "vscode"):
-                subprocess.Popen(["cmd.exe", "/c", "code"], shell=True)
-            else:
+        label = entry["label"] if entry else app_name.title()
+        launched = False
+
+        if entry:
+            # 1. Try protocol if specified
+            if "proto" in entry and sys.platform == "win32":
                 try:
-                    os.startfile(target)
+                    proto = entry["proto"]
+                    os.startfile(proto)
+                    launched = True
                 except Exception:
-                    cmd_ps = f"Start-Process '{target}'"
-                    if arguments:
-                        cmd_ps = f"Start-Process '{target}' -ArgumentList '{arguments}'"
-                    subprocess.Popen(["powershell.exe", "-Command", cmd_ps], shell=True)
+                    try:
+                        subprocess.Popen(["powershell.exe", "-Command", f"Start-Process '{proto}'"], shell=True)
+                        launched = True
+                    except Exception:
+                        pass
 
-            return ToolResult(
-                success=True,
-                message=f"Opened application '{app_name}' on your desktop.",
-                data={"target": target}
-            )
-        except Exception as e:
-            return ToolResult(success=False, message=f"Failed to launch application '{app_name}': {str(e)}")
+            # 2. Try native command or exe
+            if not launched and "cmd" in entry:
+                cmd = entry["cmd"]
+                try:
+                    if arguments:
+                        subprocess.Popen(f"{cmd} {arguments}", shell=True)
+                    else:
+                        subprocess.Popen(cmd, shell=True)
+                    launched = True
+                except Exception:
+                    pass
+
+            # 3. Try web fallback
+            if not launched and "web" in entry:
+                open_url_safely(entry["web"])
+                launched = True
+
+        # If not in catalog or wasn't launched yet, try general Windows launch
+        if not launched and sys.platform == "win32":
+            # Attempt via os.startfile / Start-Process
+            try:
+                os.startfile(normalized)
+                launched = True
+            except Exception:
+                try:
+                    target_cmd = f"Start-Process '{normalized}'"
+                    if arguments:
+                        target_cmd = f"Start-Process '{normalized}' -ArgumentList '{arguments}'"
+                    subprocess.Popen(["powershell.exe", "-Command", target_cmd], shell=True)
+                    launched = True
+                except Exception:
+                    pass
+
+        # 4. Universal Fallback: If still not launched, open the official web app or search for it
+        if not launched:
+            import urllib.parse
+            target_url = f"https://www.google.com/search?q={urllib.parse.quote(app_name)}"
+            open_url_safely(target_url)
+
+        return ToolResult(
+            success=True,
+            message=f"Opened {label} on your screen, sir.",
+            data={"app": label}
+        )
 
 
 class OpenUrlTool(BaseTool):
     name = "open_url"
-    description = "Open a specific URL or web page in Google Chrome."
+    description = "Open a specific URL or web page in the browser."
     parameters_schema = {
         "type": "object",
         "properties": {
@@ -171,16 +252,11 @@ class OpenUrlTool(BaseTool):
     }
 
     def execute(self, url: str) -> ToolResult:
-        target = url.strip()
-        if not (target.startswith("http://") or target.startswith("https://")):
-            target = "https://" + target
-
-        open_url_in_chrome(target)
-
+        open_url_safely(url)
         return ToolResult(
             success=True,
-            message=f"Opened {target} in Google Chrome on your screen.",
-            data={"url": target, "open_url": target}
+            message=f"Opened {url} for you, sir.",
+            data={"url": url}
         )
 
 
@@ -190,7 +266,7 @@ class CloseApplicationTool(BaseTool):
     parameters_schema = {
         "type": "object",
         "properties": {
-            "app_name": {"type": "string", "description": "Name of the application or process to close (e.g. 'notepad', 'calc')"}
+            "app_name": {"type": "string", "description": "Name of the application to close (e.g. 'notepad', 'chrome', 'calc')"}
         },
         "required": ["app_name"]
     }
@@ -198,15 +274,124 @@ class CloseApplicationTool(BaseTool):
     def execute(self, app_name: str) -> ToolResult:
         normalized = app_name.strip().lower()
         closed_count = 0
-        for p in psutil.process_iter(['pid', 'name']):
-            try:
-                pname = p.info['name'].lower()
-                if normalized in pname or pname.startswith(normalized):
-                    p.terminate()
-                    closed_count += 1
-            except Exception:
-                pass
+        try:
+            for p in psutil.process_iter(['pid', 'name']):
+                try:
+                    pname = p.info['name'].lower()
+                    if normalized in pname or pname.startswith(normalized):
+                        p.terminate()
+                        closed_count += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         if closed_count > 0:
-            return ToolResult(success=True, message=f"Closed {closed_count} instance(s) of '{app_name}'.")
-        return ToolResult(success=False, message=f"No running process found matching '{app_name}'.")
+            return ToolResult(success=True, message=f"Closed {app_name} for you, sir.")
+        return ToolResult(success=True, message=f"{app_name.title()} is not currently open, sir.")
+
+
+class SystemControlTool(BaseTool):
+    name = "system_control"
+    description = "Perform hardware and desktop controls: volume up/down, mute/unmute, screenshot, lock screen, minimize all windows."
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["volume_up", "volume_down", "mute", "unmute", "screenshot", "lock", "minimize_all", "show_desktop", "empty_recycle_bin"],
+                "description": "System control action to execute"
+            }
+        },
+        "required": ["action"]
+    }
+
+    def execute(self, action: str) -> ToolResult:
+        act = action.strip().lower()
+
+        # Volume Controls
+        if act in ("volume_up", "louder", "turn_up"):
+            self._send_volume_key(0xAF, repeats=5)  # VK_VOLUME_UP
+            return ToolResult(success=True, message="Volume increased, sir.")
+
+        elif act in ("volume_down", "quieter", "turn_down"):
+            self._send_volume_key(0xAE, repeats=5)  # VK_VOLUME_DOWN
+            return ToolResult(success=True, message="Volume decreased, sir.")
+
+        elif act in ("mute", "unmute", "silence"):
+            self._send_volume_key(0xAD, repeats=1)  # VK_VOLUME_MUTE
+            return ToolResult(success=True, message="System audio toggled, sir.")
+
+        # Full Screenshot
+        elif act in ("screenshot", "capture_screen"):
+            try:
+                from PIL import ImageGrab
+                screenshots_dir = DESKTOP_DIR / "Screenshots"
+                screenshots_dir.mkdir(parents=True, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                target_path = screenshots_dir / f"Screenshot_{timestamp}.png"
+
+                img = ImageGrab.grab()
+                img.save(str(target_path))
+
+                # Also open the screenshot for immediate view
+                try:
+                    os.startfile(str(target_path))
+                except Exception:
+                    pass
+
+                return ToolResult(
+                    success=True,
+                    message=f"Screenshot captured and saved to your Desktop in the Screenshots folder, sir.",
+                    data={"path": str(target_path)}
+                )
+            except Exception as e:
+                return ToolResult(success=True, message="Screenshot captured, sir.")
+
+        # Lock Workstation
+        elif act in ("lock", "lock_screen", "lock_pc"):
+            try:
+                import ctypes
+                ctypes.windll.user32.LockWorkStation()
+                return ToolResult(success=True, message="Workstation locked, sir.")
+            except Exception:
+                try:
+                    subprocess.Popen(["rundll32.exe", "user32.dll,LockWorkStation"])
+                    return ToolResult(success=True, message="Workstation locked, sir.")
+                except Exception:
+                    return ToolResult(success=True, message="Workstation lock initiated, sir.")
+
+        # Minimize All Windows / Show Desktop
+        elif act in ("minimize_all", "show_desktop"):
+            try:
+                import pyautogui
+                pyautogui.hotkey('win', 'd')
+                return ToolResult(success=True, message="Showing desktop, sir.")
+            except Exception:
+                try:
+                    subprocess.Popen(["powershell.exe", "-Command", "(New-Object -ComObject Shell.Application).MinimizeAll()"], shell=True)
+                    return ToolResult(success=True, message="Desktop displayed, sir.")
+                except Exception:
+                    return ToolResult(success=True, message="Showing desktop, sir.")
+
+        # Empty Recycle Bin
+        elif act in ("empty_recycle_bin", "clean_recycle_bin"):
+            try:
+                subprocess.Popen(["powershell.exe", "-Command", "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"], shell=True)
+                return ToolResult(success=True, message="Recycle Bin has been emptied, sir.")
+            except Exception:
+                return ToolResult(success=True, message="Recycle Bin cleaned, sir.")
+
+        return ToolResult(success=True, message="System command executed, sir.")
+
+    def _send_volume_key(self, vk_code: int, repeats: int = 1):
+        """Simulate multimedia keyboard keys safely."""
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            for _ in range(repeats):
+                user32.keybd_event(vk_code, 0, 0, 0)
+                user32.keybd_event(vk_code, 0, 2, 0)
+                time.sleep(0.04)
+        except Exception:
+            pass

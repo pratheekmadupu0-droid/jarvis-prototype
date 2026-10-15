@@ -15,7 +15,7 @@ from app.tools.filesystem_tools import (
     CreateFolderTool, CreateFileTool, ReadFileTool, ListDirectoryTool, CreateProjectStructureTool, OpenFolderTool
 )
 from app.tools.system_tools import (
-    LaunchApplicationTool, OpenUrlTool, CloseApplicationTool
+    LaunchApplicationTool, OpenUrlTool, CloseApplicationTool, SystemControlTool
 )
 from app.tools.time_tools import (
     GetTimeTool, GetDateTool, CalculateTimeUntilTool
@@ -109,6 +109,7 @@ class ToolRegistry:
         self.register(LaunchApplicationTool())
         self.register(OpenUrlTool())
         self.register(CloseApplicationTool())
+        self.register(SystemControlTool())
 
         # Time
         self.register(GetTimeTool())
