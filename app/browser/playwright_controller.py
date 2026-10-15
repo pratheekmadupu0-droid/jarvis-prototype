@@ -17,7 +17,10 @@ class PlaywrightBrowser:
 
     def __init__(self):
         self.user_data_dir = DATA_DIR / "browser_profile"
-        self.user_data_dir.mkdir(exist_ok=True)
+        try:
+            self.user_data_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
 
     def navigate_and_extract(self, url: str) -> Dict[str, Any]:
         """Navigate to a URL and extract text title and summary."""

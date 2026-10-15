@@ -12,8 +12,17 @@ import threading
 import queue
 import time
 from typing import Optional, Callable
-import pyttsx3
-import pygame
+
+try:
+    import pyttsx3
+except ImportError:
+    pyttsx3 = None
+
+try:
+    import pygame
+except ImportError:
+    pygame = None
+
 from app.config import Config
 
 
@@ -28,20 +37,22 @@ class TTSEngine:
         self._on_finish_callback: Optional[Callable[[], None]] = None
 
         # Initialize Pygame mixer for edge-tts audio files
-        try:
-            if not pygame.mixer.get_init():
-                pygame.mixer.init()
-        except Exception as e:
-            print(f"[TTS] Pygame mixer init note: {e}")
+        if pygame:
+            try:
+                if not pygame.mixer.get_init():
+                    pygame.mixer.init()
+            except Exception as e:
+                print(f"[TTS] Pygame mixer init note: {e}")
 
         # Initialize pyttsx3 local fallback engine
         self._pyttsx3_engine = None
-        try:
-            self._pyttsx3_engine = pyttsx3.init()
-            self._pyttsx3_engine.setProperty('rate', 185)
-            self._pyttsx3_engine.setProperty('volume', 1.0)
-        except Exception as e:
-            print(f"[TTS] pyttsx3 init note: {e}")
+        if pyttsx3:
+            try:
+                self._pyttsx3_engine = pyttsx3.init()
+                self._pyttsx3_engine.setProperty('rate', 185)
+                self._pyttsx3_engine.setProperty('volume', 1.0)
+            except Exception as e:
+                print(f"[TTS] pyttsx3 init note: {e}")
 
         # Background worker thread for speech
         self._worker_thread = threading.Thread(target=self._speech_worker, daemon=True)
@@ -188,11 +199,20 @@ class TTSEngine:
 
     def _speak_with_pyttsx3(self, text: str):
         if not self._pyttsx3_engine:
-            self._pyttsx3_engine = pyttsx3.init()
+            if pyttsx3:
+                try:
+                    self._pyttsx3_engine = pyttsx3.init()
+                except Exception:
+                    return
+            else:
+                return
         if self._stop_event.is_set():
             return
-        self._pyttsx3_engine.say(text)
-        self._pyttsx3_engine.runAndWait()
+        try:
+            self._pyttsx3_engine.say(text)
+            self._pyttsx3_engine.runAndWait()
+        except Exception:
+            pass
 
 
 tts = TTSEngine()

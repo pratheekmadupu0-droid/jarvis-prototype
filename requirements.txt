@@ -1,16 +1,27 @@
-PySide6>=6.5.0
+# Web Server & API Framework
+fastapi>=0.100.0
+uvicorn>=0.22.0
+pydantic>=2.0.0
+
+# Core AI & Integrations
 openai>=1.10.0
-edge-tts>=6.1.0
-pyttsx3>=2.90
-SpeechRecognition>=3.10.0
-PyAudio>=0.2.14
 requests>=2.31.0
 python-dotenv>=1.0.0
-pywinauto>=0.6.8
-pywin32>=306
 psutil>=5.9.0
-playwright>=1.40.0
+edge-tts>=6.1.0
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.2.0
 google-auth-oauthlib>=1.2.0
+
+# Desktop & Windows-Specific Dependencies (Ignored on Linux/Vercel)
+PySide6>=6.5.0; sys_platform == 'win32'
+pywinauto>=0.6.8; sys_platform == 'win32'
+pywin32>=306; sys_platform == 'win32'
+PyAudio>=0.2.14; sys_platform == 'win32'
+SpeechRecognition>=3.10.0; sys_platform == 'win32'
+pyttsx3>=2.90; sys_platform == 'win32'
+pygame>=2.5.0; sys_platform == 'win32'
+playwright>=1.40.0; sys_platform == 'win32'
+
+# Testing
 pytest>=7.4.0

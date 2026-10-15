@@ -9,11 +9,21 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
+import tempfile
+
 # Base Paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_DIR = PROJECT_ROOT / "app"
-DATA_DIR = PROJECT_ROOT / "data"
-DATA_DIR.mkdir(exist_ok=True)
+
+if os.environ.get("VERCEL"):
+    DATA_DIR = Path(tempfile.gettempdir()) / "jarvis_data"
+else:
+    DATA_DIR = PROJECT_ROOT / "data"
+
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    DATA_DIR = Path(tempfile.gettempdir())
 
 DB_PATH = DATA_DIR / "jarvis.db"
 
